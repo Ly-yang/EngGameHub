@@ -1,0 +1,509 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户表
+model User {
+  id                String    @id @default(cuid())
+  uuid              String    @unique @default(uuid())
+  email             String    @unique
+  emailVerified     Boolean   @default(false)
+  emailVerifiedAt   DateTime?
+  passwordHash      String
+  nickname          String?
+  firstName         String?
+  lastName          String?
+  avatarUrl         String?
+  phone             String?   @unique
+  phoneVerified     Boolean   @default(false)
+  dateOfBirth       DateTime?
+  
+  // 学习相关
+  currentLevel      CEFRLevel @default(A1)
+  totalXP           BigInt    @default(0)
+  currentStreak     Int       @default(0)
+  maxStreak         Int       @default(0)
+  
+  // 订阅和权限
+  subscriptionType  SubscriptionType @default(FREE)
+  subscriptionExpiry DateTime?
+  roles             UserRole[]
+  
+  // 安全相关
+  mfaEnabled        Boolean   @default(false)
+  mfaSecret         String?
+  
+  // 时间戳
+  lastLoginAt       DateTime?
+  lastActivityAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // 关系
+  learningAttempts  LearningAttempt[]
+  gameParticipations GameParticipation[]
+  createdQuestions  Question[] @relation("QuestionCreator")
+  reviewedQuestions Question[] @relation("QuestionReviewer")
+  userPreferences   UserPreferences?
+  userProgress      UserProgress[]
+  achievements      UserAchievement[]
+  gameSessions      GameSession[]
+  refreshTokens     RefreshToken[]
+  auditLogs         AuditLog[]
+  
+  @@map("users")
+  @@index([email, emailVerified])
+  @@index([lastActivityAt])
+  @@index([totalXP])
+  @@index([createdAt])
+}
+
+// 用户角色枚举
+enum UserRole {
+  STUDENT
+  TEACHER
+  ADMIN
+  MODERATOR
+}
+
+// CEFR等级枚举
+enum CEFRLevel {
+  A1
+  A2
+  B1
+  B2
+  C1
+  C2
+}
+
+// 订阅类型枚举
+enum SubscriptionType {
+  FREE
+  BASIC
+  PREMIUM
+  ENTERPRISE
+}
+
+// 模块类型枚举
+enum ModuleType {
+  GRAMMAR
+  VOCABULARY
+  LISTENING
+  SPEAKING
+  READING
+  WRITING
+  PRONUNCIATION
+  CONVERSATION
+}
+
+// 技能类型枚举（与ModuleType对应）
+enum SkillType {
+  GRAMMAR
+  VOCABULARY
+  LISTENING
+  SPEAKING
+  READING
+  WRITING
+  PRONUNCIATION
+  CONVERSATION
+}
+
+// 用户偏好设置
+model UserPreferences {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // 学习偏好
+  preferredDifficulty Float    @default(0.5) // 0-1之间
+  studyReminders      Boolean  @default(true)
+  studyReminderTime   String?  // HH:MM格式
+  preferredModules    ModuleType[]
+  
+  // 通知设置
+  emailNotifications  Boolean  @default(true)
+  pushNotifications   Boolean  @default(true)
+  gameInvitations     Boolean  @default(true)
+  
+  // 界面设置
+  language            String   @default("en")
+  theme               String   @default("light") // light, dark, auto
+  soundEnabled        Boolean  @default(true)
+  
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  
+  @@map("user_preferences")
+}
+
+// 题目表
+model Question {
+  id                String           @id @default(cuid())
+  moduleType        ModuleType
+  level             CEFRLevel
+  skillType         SkillType
+  difficulty        Float            @default(5) // 1-10动态难度
+  
+  // 题目内容
+  content           Json             // 题目内容(文本、选项、多媒体URL等)
+  correctAnswer     Json             // 正确答案(可能是字符串或数组)
+  explanation       String?          // 答案解释
+  hints             Json?            // 提示信息
+  
+  // 元数据
+  tags              String[]         @default([])
+  estimatedTime     Int              @default(30) // 预计完成时间(秒)
+  version           Int              @default(1)
+  
+  // 审核状态
+  reviewStatus      ReviewStatus     @default(PENDING)
+  createdById       String
+  createdBy         User             @relation("QuestionCreator", fields: [createdById], references: [id])
+  reviewedById      String?
+  reviewedBy        User?            @relation("QuestionReviewer", fields: [reviewedById], references: [id])
+  reviewNotes       String?
+  
+  // 统计数据
+  usageCount        Int              @default(0)
+  correctRate       Float            @default(0) // 0-1
+  avgResponseTime   Int              @default(0) // 毫秒
+  difficultyRating  Float            @default(0) // 基于用户反馈的动态难度
+  
+  // 时间戳
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  // 关系
+  learningAttempts  LearningAttempt[]
+  gameQuestions     GameQuestion[]
+  
+  @@map("questions")
+  @@index([moduleType, level, reviewStatus])
+  @@index([difficulty, usageCount])
+  @@index([tags])
+  @@index([createdAt])
+}
+
+// 审核状态枚举
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  NEEDS_REVISION
+}
+
+// 学习记录表 (按月分区)
+model LearningAttempt {
+  id                String     @id @default(cuid())
+  userId            String
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionId        String
+  question          Question   @relation(fields: [questionId], references: [id])
+  
+  // 答题信息
+  userAnswer        Json       // 用户答案
+  isCorrect         Boolean
+  responseTime      Int        // 响应时间(毫秒)
+  score             Int        @default(0)
+  
+  // AI反馈
+  aiFeedback        Json?      // AI生成的个性化反馈
+  difficultyRating  Float?     // 用户对题目难度的评分
+  
+  // 会话信息
+  sessionId         String     // 学习会话ID
+  moduleType        ModuleType
+  
+  // 时间戳
+  createdAt         DateTime   @default(now())
+  
+  @@map("learning_attempts")
+  @@index([userId, createdAt])
+  @@index([questionId])
+  @@index([sessionId])
+  @@index([moduleType, createdAt])
+  @@index([isCorrect, createdAt])
+}
+
+// 用户进度表
+model UserProgress {
+  id            String     @id @default(cuid())
+  userId        String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  moduleType    ModuleType
+  skillType     SkillType
+  level         CEFRLevel
+  
+  // 进度统计
+  totalAttempts     Int      @default(0)
+  correctAttempts   Int      @default(0)
+  accuracy          Float    @default(0) // 正确率
+  avgResponseTime   Int      @default(0) // 平均响应时间
+  
+  // 技能水平评估
+  skillLevel        Float    @default(0) // 0-100技能水平
+  confidence        Float    @default(0) // 置信度
+  lastAssessmentAt  DateTime?
+  
+  // 学习统计
+  totalTimeSpent    Int      @default(0) // 总学习时间(秒)
+  streakCount       Int      @default(0) // 连续学习天数
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@unique([userId, moduleType, skillType])
+  @@map("user_progress")
+  @@index([userId])
+  @@index([moduleType, skillType])
+}
+
+// 游戏房间表
+model GameRoom {
+  id              String        @id @default(cuid())
+  hostId          String
+  
+  // 游戏设置
+  gameMode        ModuleType
+  maxPlayers      Int           @default(2)
+  isPrivate       Boolean       @default(false)
+  gameState       GameState     @default(WAITING)
+  
+  // 房间设置
+  settings        Json          // 游戏设置(时间限制、题目数量等)
+  
+  // 时间戳
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  startedAt       DateTime?
+  endedAt         DateTime?
+  
+  // 关系
+  gameSessions    GameSession[]
+  gameQuestions   GameQuestion[]
+  
+  @@map("game_rooms")
+  @@index([gameState, isPrivate])
+  @@index([createdAt])
+}
+
+// 游戏状态枚举
+enum GameState {
+  WAITING
+  STARTING
+  ACTIVE
+  PAUSED
+  ENDED
+  CANCELLED
+}
+
+// 游戏会话表
+model GameSession {
+  id              String              @id @default(cuid())
+  roomId          String
+  room            GameRoom            @relation(fields: [roomId], references: [id])
+  userId          String
+  user            User                @relation(fields: [userId], references: [id])
+  
+  // 游戏结果
+  finalScore      Int                 @default(0)
+  finalRank       Int?                // 最终排名
+  totalCorrect    Int                 @default(0)
+  totalQuestions  Int                 @default(0)
+  accuracy        Float               @default(0)
+  avgResponseTime Int                 @default(0)
+  
+  // 状态
+  isActive        Boolean             @default(true)
+  leftAt          DateTime?
+  
+  createdAt       DateTime            @default(now())
+  
+  // 关系
+  participations  GameParticipation[]
+  
+  @@unique([roomId, userId])
+  @@map("game_sessions")
+  @@index([userId])
+  @@index([roomId])
+}
+
+// 游戏参与记录表
+model GameParticipation {
+  id              String      @id @default(cuid())
+  sessionId       String
+  session         GameSession @relation(fields: [sessionId], references: [id])
+  userId          String
+  user            User        @relation(fields: [userId], references: [id])
+  questionId      String
+  
+  // 答题结果
+  userAnswer      Json
+  isCorrect       Boolean
+  responseTime    Int         // 毫秒
+  score           Int
+  
+  // 实时排名
+  rankAtTime      Int?
+  
+  createdAt       DateTime    @default(now())
+  
+  @@map("game_participations")
+  @@index([sessionId])
+  @@index([userId])
+}
+
+// 游戏题目表
+model GameQuestion {
+  id          String    @id @default(cuid())
+  roomId      String
+  room        GameRoom  @relation(fields: [roomId], references: [id])
+  questionId  String
+  question    Question  @relation(fields: [questionId], references: [id])
+  
+  orderIndex  Int       // 题目顺序
+  isActive    Boolean   @default(false)
+  startedAt   DateTime?
+  endedAt     DateTime?
+  
+  @@unique([roomId, orderIndex])
+  @@map("game_questions")
+  @@index([roomId])
+}
+
+// 成就系统
+model Achievement {
+  id            String            @id @default(cuid())
+  name          String
+  description   String
+  iconUrl       String?
+  category      AchievementCategory
+  
+  // 解锁条件
+  conditions    Json              // 解锁条件配置
+  xpReward      Int               @default(0)
+  
+  isActive      Boolean           @default(true)
+  createdAt     DateTime          @default(now())
+  
+  // 关系
+  userAchievements UserAchievement[]
+  
+  @@map("achievements")
+}
+
+enum AchievementCategory {
+  LEARNING
+  STREAK
+  SKILL
+  GAME
+  SOCIAL
+  SPECIAL
+}
+
+// 用户成就表
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  
+  unlockedAt    DateTime    @default(now())
+  
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+// 刷新令牌表
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  @@map("refresh_tokens")
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// 审计日志表
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  
+  action    String   // 操作类型
+  resource  String   // 资源类型
+  resourceId String? // 资源ID
+  
+  // 请求信息
+  ip        String?
+  userAgent String?
+  
+  // 详细信息
+  details   Json?
+  
+  createdAt DateTime @default(now())
+  
+  @@map("audit_logs")
+  @@index([userId])
+  @@index([action, createdAt])
+  @@index([resource, createdAt])
+}
+
+// 系统通知表
+model Notification {
+  id        String            @id @default(cuid())
+  userId    String
+  
+  type      NotificationType
+  title     String
+  message   String
+  data      Json?             // 额外数据
+  
+  isRead    Boolean           @default(false)
+  readAt    DateTime?
+  
+  createdAt DateTime          @default(now())
+  expiresAt DateTime?
+  
+  @@map("notifications")
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+enum NotificationType {
+  SYSTEM
+  ACHIEVEMENT
+  GAME_INVITE
+  LEARNING_REMINDER
+  STREAK_WARNING
+  SUBSCRIPTION
+}
+
+// 系统配置表
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  
+  description String?
+  isPublic    Boolean  @default(false) // 是否对客户端可见
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("system_configs")
+}
