@@ -423,7 +423,7 @@ sudo ufw allow 4000
 
 ## 📞 支持
 
-- 📧 **Email**: support@enggamehub.com
+- 📧 **Email**: 2406662589@qq.com
 - 💬 **Discord**: https://discord.gg/enggamehub
 - 📖 **文档**: https://docs.enggamehub.com
 - 🐛 **问题反馈**: https://github.com/Ly-yang/EngGameHub/issues
