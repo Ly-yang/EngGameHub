@@ -443,4 +443,4 @@ sudo ufw allow 4000
 
 **⭐ 如果这个项目对你有帮助，请给我们一个星标！**
 
-[![Star History Chart](https://api.star-history.com/svg?repos=your-org/enggamehub&type=Date)](https://star-history.com/#your-org/enggamehub&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Ly-yang/EngGameHub&type=Date)](https://star-history.com/#your-org/enggamehub&Date)
